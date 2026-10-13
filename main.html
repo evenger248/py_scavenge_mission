@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VANGUARD-7: System Recovery</title>
+    
+    <!-- PyScript CSS & Core JS -->
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css">
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+
+    <!-- Retro CRT Terminal Styles -->
+    <style>
+        :root {
+            --phosphor-green: #00ff66;
+            --phosphor-dim: #003311;
+            --phosphor-glow: rgba(0, 255, 102, 0.4);
+            --crt-bg: #050a05;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: #020502;
+            color: var(--phosphor-green);
+            font-family: 'Courier New', Courier, monospace;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* CRT Scanline & Flicker Overlays */
+        body::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 999;
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+        }
+
+        body::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: radial-gradient(circle at center, transparent 60%, rgba(0, 0, 0, 0.8) 100%);
+            z-index: 1000;
+            pointer-events: none;
+        }
+
+        /* Top Status Bar */
+        header {
+            background: var(--phosphor-dim);
+            border-bottom: 2px solid var(--phosphor-green);
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            text-shadow: 0 0 8px var(--phosphor-glow);
+            font-size: 0.9rem;
+            letter-spacing: 1px;
+        }
+
+        .status-group span {
+            margin-right: 20px;
+        }
+
+        /* Room Navigation Bar */
+        nav {
+            background: #020802;
+            border-bottom: 1px dashed var(--phosphor-green);
+            padding: 8px 20px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .room-btn {
+            background: transparent;
+            color: var(--phosphor-green);
+            border: 1px solid var(--phosphor-green);
+            padding: 5px 12px;
+            font-family: inherit;
+            cursor: pointer;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+        }
+
+        .room-btn:hover, .room-btn.active {
+            background: var(--phosphor-green);
+            color: var(--crt-bg);
+            box-shadow: 0 0 10px var(--phosphor-green);
+        }
+
+        /* Main Terminal Window */
+        #terminal-container {
+            flex: 1;
+            background: var(--crt-bg);
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.9);
+        }
+
+        #output-log {
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin-bottom: 15px;
+            line-height: 1.4;
+            text-shadow: 0 0 5px var(--phosphor-glow);
+        }
+
+        /* Command Input Prompt */
+        #input-form {
+            display: flex;
+            align-items: center;
+            background: rgba(0, 51, 17, 0.3);
+            border: 1px solid var(--phosphor-green);
+            padding: 8px 12px;
+            box-shadow: 0 0 10px rgba(0, 255, 102, 0.1);
+        }
+
+        .prompt-symbol {
+            margin-right: 10px;
+            font-weight: bold;
+            text-shadow: 0 0 8px var(--phosphor-glow);
+        }
+
+        #command-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--phosphor-green);
+            font-family: inherit;
+            font-size: 1rem;
+            outline: none;
+            text-shadow: 0 0 5px var(--phosphor-glow);
+        }
+
+        /* Utility classes */
+        .error { color: #ff3333; text-shadow: 0 0 8px rgba(255,51,51,0.6); }
+        .system-msg { color: #ffcc00; text-shadow: 0 0 8px rgba(255,204,0,0.6); }
+    </style>
+</head>
+<body>
+
+    <!-- Ship Status Header -->
+    <header>
+        <div class="status-group">
+            <span>VESSEL: VANGUARD-7</span>
+            <span>CURRENT ROOM: <strong id="current-room-display">AIRLOCK</strong></span>
+        </div>
+        <div class="status-group">
+            <span>REACTOR: <span id="reactor-status" class="error">OFFLINE</span></span>
+            <span>BRIDGE: <span id="bridge-status" class="error">LOCKED</span></span>
+        </div>
+    </header>
+
+    <!-- Navigation Rooms -->
+    <nav>
+        <button class="room-btn active" onclick="switchRoom('airlock')">[1] Airlock</button>
+        <button class="room-btn" onclick="switchRoom('cargo')">[2] Cargo Bay</button>
+        <button class="room-btn" onclick="switchRoom('engineering')">[3] Engineering</button>
+        <button class="room-btn" onclick="switchRoom('bridge')">[4] Bridge</button>
+    </nav>
+
+    <!-- Terminal Display Area -->
+    <div id="terminal-container">
+        <div id="output-log">VANGUARD-7 Terminal OS [Version 3.1.4-beta]
+Type python commands or scripts below. Type 'help()' for diagnostic procedures.
+> Initializing subsystem context... [OK]
+> Note to self: Everything started at 0.
+</div>
+        <form id="input-form" onsubmit="handleCommand(event)">
+            <span class="prompt-symbol" id="prompt-label">airlock:~#</span>
+            <input type="text" id="command-input" autocomplete="off" autofocus placeholder="Enter command or python expression...">
+        </form>
+    </div>
+
+    <!-- Python Runtime Configuration -->
+    <script type="py" config="./pyscript.json">
+        import js
+        import json
+        import os
+
+        # Initialize virtual ship filesystem structure in memory
+        os.makedirs("/ship/airlock", exist_ok=True)
+        os.makedirs("/ship/cargo", exist_ok=True)
+        os.makedirs("/ship/engineering", exist_ok=True)
+        os.makedirs("/ship/bridge", exist_ok=True)
+        os.makedirs("/ship/shared", exist_ok=True)
+
+        # Create default initial files
+        with open("/ship/shared/telemetry.json", "w") as f:
+            json.dump({"temp": 0, "status": "OFFLINE"}, f)
+
+        def run_terminal_command(cmd_str):
+            """Executes Python code or terminal commands safely."""
+            try:
+                # Catch assignments or expressions
+                if cmd_str.startswith("help()"):
+                    return "Available commands: ls, cat <file>, python <script.py>, or raw Python statements."
+                
+                # Evaluate standard python expressions or statements
+                # Redirect local scope execution if needed
+                local_scope = {}
+                exec(cmd_str, globals(), local_scope)
+                return f"> Executed successfully."
+            except Exception as e:
+                # Trigger speech synthesis alert on fatal crash
+                js.speakShipAI("Warning. Exception detected in subsystem.")
+                return f"Traceback (most recent call last):\n  {type(e).__name__}: {e}"
+    </script>
+
+    <!-- JavaScript Terminal Bridge & Audio/Speech Controller -->
+    <script>
+        let currentRoom = 'airlock';
+
+        function speakShipAI(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.pitch = 0.75;
+                utterance.rate = 0.95;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        function switchRoom(roomName) {
+            currentRoom = roomName;
+            document.querySelectorAll('.room-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            document.getElementById('current-room-display').innerText = roomName.toUpperCase();
+            document.getElementById('prompt-label').innerText = `${roomName}:~#`;
+            
+            appendOutput(`\n[NAV] Stepped into ${roomName.toUpperCase()} sector.\n`, 'system-msg');
+            speakShipAI(`Entered ${roomName}`);
+        }
+
+        function appendOutput(text, className = '') {
+            const log = document.getElementById('output-log');
+            const span = document.createElement('div');
+            if (className) span.className = className;
+            span.textContent = text;
+            log.appendChild(span);
+            
+            const container = document.getElementById('terminal-container');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function handleCommand(event) {
+            event.preventDefault();
+            const input = document.getElementById('command-input');
+            const cmd = input.value.trim();
+            if (!cmd) return;
+
+            appendOutput(`${currentRoom}:~# ${cmd}`);
+            input.value = '';
+
+            if (cmd === 'clear') {
+                document.getElementById('output-log').textContent = '';
+                return;
+            }
+
+            // Call Python execution bridge via PyScript global scope if available
+            try {
+                let pyEngine = pyscript.interpreter;
+                let result = await pyEngine.run(`run_terminal_command(${JSON.stringify(cmd)})`);
+                if (result) {
+                    let className = result.startsWith('Traceback') ? 'error' : '';
+                    appendOutput(result, className);
+                }
+            } catch (err) {
+                appendOutput(`System Error: ${err.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
