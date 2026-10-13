@@ -178,21 +178,23 @@
     <!-- Terminal Display Area -->
     <div id="terminal-container">
         <div id="output-log">VANGUARD-7 Terminal OS [Version 3.1.4-beta]
-Type python commands or scripts below. Type 'help()' for diagnostic procedures.
+Type Python commands or scripts below. Type 'help()' for diagnostic procedures.
 > Initializing subsystem context... [OK]
 > Note to self: Everything started at 0.
 </div>
-        <form id="input-form" onsubmit="handleCommand(event)">
+        <!-- Notice onsubmit is removed; Python handles it via addEventListener -->
+        <form id="input-form">
             <span class="prompt-symbol" id="prompt-label">airlock:~#</span>
             <input type="text" id="command-input" autocomplete="off" autofocus placeholder="Enter command or python expression...">
         </form>
     </div>
 
-    <!-- Python Runtime Configuration -->
-    <script type="py" config="./pyscript.json">
-        import js
+    <!-- Python Runtime & Terminal Logic -->
+    <script type="py">
         import json
         import os
+        from js import document, window
+        from pyodide.ffi import create_proxy
 
         # Initialize virtual ship filesystem structure in memory
         os.makedirs("/ship/airlock", exist_ok=True)
@@ -201,29 +203,58 @@ Type python commands or scripts below. Type 'help()' for diagnostic procedures.
         os.makedirs("/ship/bridge", exist_ok=True)
         os.makedirs("/ship/shared", exist_ok=True)
 
-        # Create default initial files
         with open("/ship/shared/telemetry.json", "w") as f:
             json.dump({"temp": 0, "status": "OFFLINE"}, f)
 
-        def run_terminal_command(cmd_str):
-            """Executes Python code or terminal commands safely."""
+        def speak_ai(text):
             try:
-                # Catch assignments or expressions
-                if cmd_str.startswith("help()"):
-                    return "Available commands: ls, cat <file>, python <script.py>, or raw Python statements."
-                
-                # Evaluate standard python expressions or statements
-                # Redirect local scope execution if needed
+                window.speakShipAI(text)
+            except Exception:
+                pass
+
+        def append_output(text, class_name=""):
+            log = document.getElementById("output-log")
+            div = document.createElement("div")
+            if class_name:
+                div.className = class_name
+            div.textContent = text
+            log.appendChild(div)
+            container = document.getElementById("terminal-container")
+            container.scrollTop = container.scrollHeight
+
+        def handle_terminal_submit(event):
+            event.preventDefault()
+            input_el = document.getElementById("command-input")
+            cmd = input_el.value.strip()
+            if not cmd:
+                return
+
+            current_room = document.getElementById("current-room-display").textContent.lower()
+            append_output(f"{current_room}:~# {cmd}")
+            input_el.value = ""
+
+            if cmd == "clear":
+                document.getElementById("output-log").textContent = ""
+                return
+
+            try:
+                if cmd.startswith("help()"):
+                    append_output("Available commands: ls, cat <file>, python <script.py>, or raw Python statements.")
+                    return
+
                 local_scope = {}
-                exec(cmd_str, globals(), local_scope)
-                return f"> Executed successfully."
+                exec(cmd, globals(), local_scope)
+                append_output("> Executed successfully.")
             except Exception as e:
-                # Trigger speech synthesis alert on fatal crash
-                js.speakShipAI("Warning. Exception detected in subsystem.")
-                return f"Traceback (most recent call last):\n  {type(e).__name__}: {e}"
+                speak_ai("Warning. Exception detected in subsystem.")
+                append_output(f"Traceback (most recent call last):\n  {type(e).__name__}: {e}", "error")
+
+        # Bind Python handler directly to the HTML form submit event
+        form = document.getElementById("input-form")
+        form.addEventListener("submit", create_proxy(handle_terminal_submit))
     </script>
 
-    <!-- JavaScript Terminal Bridge & Audio/Speech Controller -->
+    <!-- UI Helper JavaScript -->
     <script>
         let currentRoom = 'airlock';
 
@@ -245,46 +276,13 @@ Type python commands or scripts below. Type 'help()' for diagnostic procedures.
             document.getElementById('current-room-display').innerText = roomName.toUpperCase();
             document.getElementById('prompt-label').innerText = `${roomName}:~#`;
             
-            appendOutput(`\n[NAV] Stepped into ${roomName.toUpperCase()} sector.\n`, 'system-msg');
-            speakShipAI(`Entered ${roomName}`);
-        }
-
-        function appendOutput(text, className = '') {
             const log = document.getElementById('output-log');
-            const span = document.createElement('div');
-            if (className) span.className = className;
-            span.textContent = text;
-            log.appendChild(span);
+            const div = document.createElement('div');
+            div.className = 'system-msg';
+            div.textContent = `\n[NAV] Stepped into ${roomName.toUpperCase()} sector.\n`;
+            log.appendChild(div);
             
-            const container = document.getElementById('terminal-container');
-            container.scrollTop = container.scrollHeight;
-        }
-
-        async function handleCommand(event) {
-            event.preventDefault();
-            const input = document.getElementById('command-input');
-            const cmd = input.value.trim();
-            if (!cmd) return;
-
-            appendOutput(`${currentRoom}:~# ${cmd}`);
-            input.value = '';
-
-            if (cmd === 'clear') {
-                document.getElementById('output-log').textContent = '';
-                return;
-            }
-
-            // Call Python execution bridge via PyScript global scope if available
-            try {
-                let pyEngine = pyscript.interpreter;
-                let result = await pyEngine.run(`run_terminal_command(${JSON.stringify(cmd)})`);
-                if (result) {
-                    let className = result.startsWith('Traceback') ? 'error' : '';
-                    appendOutput(result, className);
-                }
-            } catch (err) {
-                appendOutput(`System Error: ${err.message}`, 'error');
-            }
+            speakShipAI(`Entered ${roomName}`);
         }
     </script>
 </body>
